@@ -1,56 +1,71 @@
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy import Index, Column, Integer, DateTime, String, Boolean, create_engine, inspect, ForeignKey, UniqueConstraint
-from sqlalchemy.orm import sessionmaker, relationship, backref
+from sqlalchemy import TypeDecorator, Index, Column, BigInteger, Integer, String, Boolean, create_engine, ForeignKey
+from sqlalchemy.orm import sessionmaker, relationship, backref, scoped_session
+from sqlalchemy.inspection import inspect
+from datetime import datetime, timedelta
 
-engine = create_engine('sqlite:////home/rhein/psitres/psitres_data/test.sqlite', echo=False)
+
+class MicrosecondTimestamp(TypeDecorator):
+    impl = BigInteger
+    epoch = datetime(1970, 1, 1)
+    def process_bind_param(self, value, dialect):
+        return long((value - self.epoch).total_seconds() * 10 ** 6)
+    def process_result_value(self, value, dialect):
+        return self.epoch + timedelta(microseconds=value)
+
+
+engine = create_engine('mysql+mysqldb://rhein:ps1tr3s@db.eecis.udel.edu:3306/psitres', echo=False)
+inspector = inspect(engine)
 Base = declarative_base(bind=engine)
-Session = sessionmaker(bind=engine)
+Session = scoped_session(sessionmaker(bind=engine))
+
 
 class CameraInfo(Base):
     __tablename__ = 'CameraInfo'
     __table_args__ = (
-            UniqueConstraint('creationTimeStamp', 'serialNumber'),
-            Index('CameraInfoIndex', 'creationTimeStamp', 'serialNumber', unique=True)
+            Index('creationTimeStamp_serialNumber', 'creationTimeStamp', 'serialNumber', unique=True),
+            {'mysql_engine':'InnoDB'},
             )
     
     id = Column(Integer, primary_key=True)
-    creationTimeStamp = Column(DateTime)
+    creationTimeStamp = Column(MicrosecondTimestamp)
     serialNumber = Column(Integer)
     
-    applicationIPAddress = Column(Integer)
+    applicationIPAddress = Column(BigInteger)
     applicationPort = Column(Integer)
     bayerTileFormat = Column(Integer)
     busNumber = Column(Integer)
     ccpStatus = Column(Integer)
-    driverName = Column(String)
+    driverName = Column(String(255))
     driverType = Column(Integer)
-    firmwareBuildTime = Column(String)
-    firmwareVersion = Column(String)
+    firmwareBuildTime = Column(String(255))
+    firmwareVersion = Column(String(255))
     gigEMajorVersion = Column(Integer)
     gigEMinorVersion = Column(Integer)
     iidcVer = Column(Integer)
     interfaceType = Column(Integer)
     isColorCamera = Column(Boolean)
     maximumBusSpeed = Column(Integer)
-    modelName = Column(String)
+    modelName = Column(String(255))
     nodeNumber = Column(Integer)
     pcieBusSpeed = Column(Integer)
-    sensorInfo = Column(String)
-    sensorResolution = Column(String)
-    userDefinedName = Column(String)
-    vendorName = Column(String)
-    xmlURL1 = Column(String)
-    xmlURL2 = Column(String)
+    sensorInfo = Column(String(255))
+    sensorResolution = Column(String(255))
+    userDefinedName = Column(String(255))
+    vendorName = Column(String(255))
+    xmlURL1 = Column(String(255))
+    xmlURL2 = Column(String(255))
+    
     
 class FC2Version(Base):
     __tablename__ = 'FC2Version'
     __table_args__ = (
-            UniqueConstraint('creationTimeStamp', 'serialNumber'),
-            Index('FC2VersionIndex', 'creationTimeStamp', 'serialNumber', unique=True)
+            Index('creationTimeStamp_serialNumber', 'creationTimeStamp', 'serialNumber', unique=True),
+            {'mysql_engine':'InnoDB'},
             )
     
     id = Column(Integer, primary_key=True)
-    creationTimeStamp = Column(DateTime)
+    creationTimeStamp = Column(MicrosecondTimestamp)
     serialNumber = Column(Integer)
     
     major = Column(Integer)
@@ -61,39 +76,40 @@ class FC2Version(Base):
 class SystemInfo(Base):
     __tablename__ = 'SystemInfo'
     __table_args__ = (
-            UniqueConstraint('creationTimeStamp', 'serialNumber'),
-            Index('SystemInfoIndex', 'creationTimeStamp', 'serialNumber', unique=True)
+            Index('creationTimeStamp_serialNumber', 'creationTimeStamp', 'serialNumber', unique=True),
+            {'mysql_engine':'InnoDB'},
             )
     
     id = Column(Integer, primary_key=True)
-    creationTimeStamp = Column(DateTime)
+    creationTimeStamp = Column(MicrosecondTimestamp)
     serialNumber = Column(Integer)
     
     osType = Column(Integer)
-    osDescription = Column(String)
+    osDescription = Column(String(255))
     byteOrder = Column(Integer)
     sysMemSize = Column(Integer)
-    cpuDescription = Column(String)
+    cpuDescription = Column(String(255))
     numCpuCores = Column(Integer)
-    driverList = Column(String)
-    libraryList = Column(String)
-    gpuDescription = Column(String)
+    driverList = Column(String(255))
+    libraryList = Column(String(255))
+    gpuDescription = Column(String(255))
     screenWidth = Column(Integer)
     screenHeight = Column(Integer)
+
 
 class ImageMetadata(Base):
     __tablename__ = 'ImageMetadata'
     __table_args__ = (
-            UniqueConstraint('creationTimeStamp', 'serialNumber'),
-            Index('ImageMetadataIndex', 'creationTimeStamp', 'serialNumber', unique=True)
+            Index('creationTimeStamp_serialNumber', 'creationTimeStamp', 'serialNumber', unique=True),
+            {'mysql_engine':'InnoDB'},
             )
     
     id = Column(Integer, primary_key=True)
-    creationTimeStamp = Column(DateTime)
+    creationTimeStamp = Column(MicrosecondTimestamp)
     serialNumber = Column(Integer)
     
     frameNumber = Column(Integer)
-    embeddedTimeStamp = Column(Integer)
+    embeddedTimeStamp = Column(BigInteger)
     embeddedGain = Column(Integer)
     embeddedShutter = Column(Integer)
     embeddedBrightness = Column(Integer)
@@ -103,7 +119,6 @@ class ImageMetadata(Base):
     embeddedStrobePattern = Column(Integer)
     embeddedGPIOPinState = Column(Integer)
     embeddedROIPosition = Column(Integer)
-    relativePath = Column(String)
     
     CameraInfo_id = Column(Integer, ForeignKey(CameraInfo.id))
     FC2Version_id = Column(Integer, ForeignKey(FC2Version.id))
@@ -113,9 +128,13 @@ class ImageMetadata(Base):
     FC2Version = relationship(FC2Version, backref=backref('ImageMetadatas'))
     SystemInfo = relationship(SystemInfo, backref=backref('ImageMetadatas'))
     
-def refresh():
+    
+def recreate():
     Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
     
+    
 if __name__ == '__main__':
-    refresh()
+    engine.echo = 'debug'
+    pass
+
