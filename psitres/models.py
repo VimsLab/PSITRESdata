@@ -134,7 +134,3 @@ def recreate():
     Base.metadata.create_all(engine)
     
     
-if __name__ == '__main__':
-    engine.echo = 'debug'
-    pass
-

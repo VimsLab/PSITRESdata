@@ -1,9 +1,9 @@
+from sqlalchemy.orm.exc import NoResultFound
 import bisect
 import math
-from sqlalchemy.orm.exc import NoResultFound
 
 
-def _read_or_instantiate(session, model_, *index_columns, **keyword_expressions):
+def read_or_instantiate(session, model_, *index_columns, **keyword_expressions):
     try:
         if len(index_columns) > 0:
             index = {col_name:keyword_expressions[col_name] for col_name in index_columns}

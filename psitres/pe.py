@@ -2,16 +2,7 @@ from __future__ import print_function
 import traceback
 import multiprocessing as mp
 import threading
-import joblib
-import functools
-
-
-def delayed(*args, **kwargs):
-    return joblib.delayed(*args, **kwargs)
-try:
-    delayed = functools.wraps(joblib.delayed)(delayed)
-except AttributeError:
-    pass
+from joblib import delayed
 
 
 def _callattr(object_, name, *args, **kwargs):
@@ -19,7 +10,11 @@ def _callattr(object_, name, *args, **kwargs):
 
 
 class _Namespace(object):
-    pass
+    def __new__(cls, dict_=None):
+        self = super(_Namespace, cls).__new__(cls)
+        if dict_ is not None:
+            self.__dict__ = dict_
+        return self
     
     
 def _initializer(initializer, initargs, local_items):
