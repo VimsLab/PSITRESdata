@@ -14,161 +14,130 @@ import csv
 from sqlalchemy.inspection import inspect
 
 
-def _binary_search(a, x):
-    'Locate the leftmost value exactly equal to x'
-    i = bisect.bisect_left(a, x)
-    if i != len(a) and a[i] == x:
-        return i
-    raise ValueError
-
-    
 def _parse_fname(fname):
-    re_creationTimeStamp = r'(?P<creationTimeStamp>\d{8}T\d{6}\.\d{6})'
+    re_creationTimeStamp = r'(?P<creationTimeStamp>\d{8}T\d{6}(\.\d{6})?)'
     re_serialNumber = r'(?P<serialNumber>\d+)'
     re_modelName = r'(?P<modelName>[a-zA-Z]\w*)'
     re_frameNumber = r'(?P<frameNumber>\d+)'
     re_ext = r'\w{3}'
-    patterns = [r'^{creationTimeStamp}\.{serialNumber}\.{frameNumber}\.{ext}$'.format(creationTimeStamp=re_creationTimeStamp,
-                                                                                      serialNumber=re_serialNumber,
-                                                                                      modelName=re_modelName,
-                                                                                      frameNumber=re_frameNumber,
-                                                                                      ext=re_ext),
-                r'^{creationTimeStamp}_{serialNumber}_{frameNumber}\.{ext}$'.format(creationTimeStamp=re_creationTimeStamp,
-                                                                                    serialNumber=re_serialNumber,
-                                                                                    modelName=re_modelName,
-                                                                                    frameNumber=re_frameNumber,
-                                                                                    ext=re_ext),
-                r'^{creationTimeStamp}_{serialNumber}_{frameNumber}\.{ext}_{modelName}\.{ext}$'.format(creationTimeStamp=re_creationTimeStamp,
-                                                                                                        serialNumber=re_serialNumber,
-                                                                                                        modelName=re_modelName,
-                                                                                                        frameNumber=re_frameNumber,
-                                                                                                        ext=re_ext),
-                r'^{creationTimeStamp}\.{serialNumber}\.{modelName}\.{ext}$'.format(creationTimeStamp=re_creationTimeStamp,
-                                                                                     serialNumber=re_serialNumber,
-                                                                                     modelName=re_modelName,
-                                                                                     ext=re_ext),
-                r'^{creationTimeStamp}_{serialNumber}_{modelName}\.{ext}$'.format(creationTimeStamp=re_creationTimeStamp,
-                                                                                   serialNumber=re_serialNumber,
-                                                                                   modelName=re_modelName,
-                                                                                   ext=re_ext), ]    
-    for pattern in patterns:
-        try:
-            return re.match(pattern, fname).groupdict()
-        except AttributeError:
-            continue
+    pattern = r'^{creationTimeStamp}(\.|_){serialNumber}((\.|_){frameNumber}\.{ext})?((\.|_){modelName}\.{ext})?$'.format(
+                                                                  creationTimeStamp=re_creationTimeStamp,
+                                                                  serialNumber=re_serialNumber,
+                                                                  modelName=re_modelName,
+                                                                  frameNumber=re_frameNumber,
+                                                                  ext=re_ext)
+    return re.match(pattern, fname).groupdict()
         
         
 def _cached_frameNumbers(root_path, rel_dir):
-    glob_key = _cached_frameNumbers, root_path, rel_dir
+    cache_key = _cached_frameNumbers, root_path, rel_dir
     try:
-        return globals()[glob_key]
+        return globals()[cache_key]
     except KeyError:
-        frm_map = {}
+        frameNumber_index = {}
         for f in os.listdir(os.path.join(root_path, rel_dir)):
-            a = _parse_fname(f)
-            try:
-                val = int(a['frameNumber'])
-                key = int(a['serialNumber']), datetime.strptime(a['creationTimeStamp'], '%Y%m%dT%H%M%S.%f')
-                frm_map[key] = val
-            except KeyError:
+            attributes = _parse_fname(f)
+                
+            if attributes['frameNumber'] is not None:
+                frameNumber = int(attributes['frameNumber'])
+                key = (int(attributes['serialNumber']),)
+                try:
+                    key = key + (datetime.strptime(attributes['creationTimeStamp'], '%Y%m%dT%H%M%S.%f'),)
+                except ValueError:
+                    key = key + (datetime.strptime(attributes['creationTimeStamp'], '%Y%m%dT%H%M%S'),)                    
+                frameNumber_index[key] = frameNumber
+            else:
                 continue
-        keys = sorted(frm_map)
-        vals = [frm_map[k] for k in keys]
+        index = sorted(frameNumber_index)
+        frameNumbers = [frameNumber_index[k] for k in index]
         
-        globals()[glob_key] = (keys, vals)
-        return globals()[glob_key]
+        globals()[cache_key] = (index, frameNumbers)
+        return globals()[cache_key]
             
     
 def _xml2model(root_path, rel_path, session):
-    rel_dir, file_ = os.path.split(rel_path)
-    attributes = _parse_fname(file_)    
+    rel_dir, fname = os.path.split(rel_path)
+    attributes = _parse_fname(fname)    
     modelName = attributes.pop('modelName')
     
-    if modelName == 'ImageMetadata' and 'frameNumber' not in attributes:        
-        keys, vals = _cached_frameNumbers(root_path, rel_dir)        
+    if (modelName == 'ImageMetadata') and (attributes['frameNumber'] is None):        
+        index, frameNumbers = _cached_frameNumbers(root_path, rel_dir)        
         try:
-            key = int(attributes['serialNumber']), datetime.strptime(attributes['creationTimeStamp'], '%Y%m%dT%H%M%S.%f')
-            i = _binary_search(keys, key)
-            attributes['frameNumber'] = vals[i]
+            key = (int(attributes['serialNumber']),)
+            try:
+                key = key + (datetime.strptime(attributes['creationTimeStamp'], '%Y%m%dT%H%M%S.%f'),)
+            except ValueError:
+                key = key + (datetime.strptime(attributes['creationTimeStamp'], '%Y%m%dT%H%M%S'),)                
+            i = utils.binary_search(index, key)
+            attributes['frameNumber'] = frameNumbers[i]
         except ValueError:
+            del attributes['frameNumber']
             warnings.warn('unable to find frameNumber for ImageMetadata: {}'.format(attributes), RuntimeWarning, 2)
         
-#         re_frameNumber = r'(?P<frameNumber>\d+)'
-#         re_ext = r'\w{3}'
-#         pattern = r'^{creationTimeStamp}\.{serialNumber}\.{frameNumber}\.{ext}$'.format(creationTimeStamp=re.escape(attributes['creationTimeStamp']),
-#                                                                                         serialNumber=re.escape(attributes['serialNumber']),
-#                                                                                         frameNumber=re_frameNumber,
-#                                                                                         ext=re_ext)
-#         
-#         for f in os.listdir(os.path.join(root_path, rel_dir)):
-#             try:
-#                 attributes['frameNumber'] = re.match(pattern, f).group('frameNumber')
-#                 break
-#             except AttributeError: 
-#                 continue
-#         else:
-#             warnings.warn('unable to find frameNumber for ImageMetadata: {}'.format(attributes), RuntimeWarning, 2)
-                
-    if 'frameNumber' in attributes:
+    if attributes['frameNumber'] is not None:
         attributes['frameNumber'] = int(attributes['frameNumber'])
-    attributes['creationTimeStamp'] = datetime.strptime(attributes['creationTimeStamp'], '%Y%m%dT%H%M%S.%f')
+    else:
+        del attributes['frameNumber']
+    
+    try:
+        attributes['creationTimeStamp'] = datetime.strptime(attributes['creationTimeStamp'], '%Y%m%dT%H%M%S.%f')
+    except ValueError:
+        attributes['creationTimeStamp'] = datetime.strptime(attributes['creationTimeStamp'], '%Y%m%dT%H%M%S')
+
     attributes['serialNumber'] = int(attributes['serialNumber'])
             
-    mdl = getattr(models, modelName)
+    model = getattr(models, modelName)    
+    index = [index for index in models.inspector.get_indexes(model.__tablename__) 
+           if index['name'] == 'creationTimeStamp_serialNumber']
+    if len(index) != 1:
+        raise ValueError('index creationTimeStamp_serialNumber does not exist in table {}'.format(model.__tablename__))
+    index = index[0]['column_names']
+    instance = utils.read_or_instantiate(session, model, *index, **attributes)
     
-    ind = [ind for ind in models.inspector.get_indexes(mdl.__tablename__) 
-           if ind['name'] == 'creationTimeStamp_serialNumber']
-    if len(ind) != 1:
-        raise ValueError('index creationTimeStamp_serialNumber does not exist in table {}'.format(mdl.__tablename__))
-    ind = ind[0]['column_names']
-    inst = utils.read_or_instantiate(session, mdl, *ind, **attributes)
-    
-    if not inspect(inst).persistent:
-        tbl = mdl.__table__    
+    if not inspect(instance).persistent:
+        table = model.__table__    
         try:
             with open(os.path.join(root_path, rel_path), 'r') as fp:
-                xroot = etree.fromstring(fp.read())
-            xroot = xroot.find(modelName)
+                root_node = etree.fromstring(fp.read())
+            root_node = root_node.find(modelName)
             
-            for attr in xroot:
-                col = getattr(tbl.columns, attr.tag)
-#                 attributes[attr.tag] = col.type.python_type(attr.text)
-                setattr(inst, attr.tag, col.type.python_type(attr.text))
+            for attribute in root_node:
+                column = getattr(table.columns, attribute.tag)
+                setattr(instance, attribute.tag, column.type.python_type(attribute.text))
         except etree.XMLSyntaxError:
             warnings.warn('unable to parse metadata for {}: {}'.format(modelName, attributes), RuntimeWarning, 2)
     
-    return inst
+    return instance
 
 
 def _commit_init_files(output_dir, init_fnames):
     pe._mp_print('_commit_init_files', len(init_fnames))
     session = models.Session()
-    instcs = [_xml2model(output_dir, f, session) for f in init_fnames]
-    ind = {(inst.serialNumber, inst.creationTimeStamp) for inst in instcs}
-    session.add_all(instcs)    
+    instances = [_xml2model(output_dir, f, session) for f in init_fnames]
+    index = {(inst.serialNumber, inst.creationTimeStamp) for inst in instances}
+    session.add_all(inst for inst in instances if not inspect(inst).persistent)    
     session.commit()
-    return ind
+    return index
 
 
 def _commit_data_files(output_dir, data_files, init_file_times):
     pe._mp_print('_commit_data_files', len(data_files))
     session = models.Session()
-    instcs = [_xml2model(output_dir, f, session) for f in data_files]
-    for inst in instcs:
-        if not inspect(inst).persistent:
-            ts = init_file_times[inst.serialNumber]
-            ts = ts[:bisect.bisect_left(ts, inst.creationTimeStamp)]
-            ts = utils.take_closest(ts, inst.creationTimeStamp)        
-            attrs = {'creationTimeStamp':ts, 'serialNumber':inst.serialNumber}
-            
-            for fk in models.inspector.get_foreign_keys(inst.__tablename__):
-                if len(fk['referred_columns']) != 1 or len(fk['constrained_columns']) != 1:
-                    raise ValueError('composite foreign keys are not supported')
-                fk_mdl = getattr(models, fk['referred_table'])
-                fk_inst = session.query(fk_mdl).filter_by(**attrs).one()
-                fk_id = getattr(fk_inst, fk['referred_columns'][0])
-                setattr(inst, fk['constrained_columns'][0], fk_id)
-    session.add_all(instcs)
+    instances = (_xml2model(output_dir, f, session) for f in data_files)
+    instances = [instance for instance in instances if not inspect(instance).persistent]
+    for instance in instances:
+        timestamp = init_file_times[instance.serialNumber]
+        timestamp = timestamp[:bisect.bisect_left(timestamp, instance.creationTimeStamp)]
+        timestamp = utils.take_closest(timestamp, instance.creationTimeStamp)        
+        attributes = {'creationTimeStamp':timestamp, 'serialNumber':instance.serialNumber}        
+        for fk in models.inspector.get_foreign_keys(instance.__tablename__):
+            if len(fk['referred_columns']) != 1 or len(fk['constrained_columns']) != 1:
+                raise ValueError('composite foreign keys are not supported')
+            fk_model = getattr(models, fk['referred_table'])
+            fk_instance = session.query(fk_model).filter_by(**attributes).one()
+            fk_id = getattr(fk_instance, fk['referred_columns'][0])
+            setattr(instance, fk['constrained_columns'][0], fk_id)
+    session.add_all(instances)
     session.commit()
     
 
@@ -182,18 +151,18 @@ def populate_db(data_dir, recreate):
     init_fnames = [f for f in sorted(os.listdir(data_dir)) 
                    if os.path.splitext(f)[1] == '.xml']
     t = time.time()
-    ind = pe.ParFor()(pe.delayed(_commit_init_files)(data_dir, fnames) 
+    index = pe.ParFor()(pe.delayed(_commit_init_files)(data_dir, fnames) 
                       for fnames in utils.partition(init_fnames, mp.cpu_count()))
     t = time.time() - t
     print '{} items / {} seconds = {} items per second'.format(len(init_fnames), t, len(init_fnames) / t)    
     
-    init_file_times = {}
-    ind = sorted({v for i in ind for v in i})    
-    for serialNumber, creationTimeStamp in ind:
+    init_timestamps = {}
+    index = sorted({v for i in index for v in i})    
+    for serialNumber, creationTimeStamp in index:
         try:
-            init_file_times[serialNumber].append(creationTimeStamp)
+            init_timestamps[serialNumber].append(creationTimeStamp)
         except KeyError:
-            init_file_times[serialNumber] = [creationTimeStamp]
+            init_timestamps[serialNumber] = [creationTimeStamp]
     
     data_dirnames = [os.path.join(d1, d2) 
                      for d1 in sorted(os.listdir(data_dir)) 
@@ -202,13 +171,14 @@ def populate_db(data_dir, recreate):
                      if os.path.isdir(os.path.join(data_dir, d1, d2))]
     
     for d in data_dirnames:
-        print datetime.strptime(d, '%Y%m%d\\%H')
+        print datetime.strptime(d, '%Y%m%d\\%H')        
+        
         data_files = [os.path.join(d, f)
                       for f in sorted(os.listdir(os.path.join(data_dir, d)))
                       if os.path.splitext(f)[1] == '.xml']
         
         t = time.time()
-        ind = pe.ParFor()(pe.delayed(_commit_data_files)(data_dir, fnames, init_file_times) 
+        index = pe.ParFor()(pe.delayed(_commit_data_files)(data_dir, fnames, init_timestamps) 
                           for fnames in utils.partition(data_files, mp.cpu_count()))
         t = time.time() - t
         print '{} items / {} seconds = {} items per second'.format(len(data_files), t, len(data_files) / t)
@@ -229,44 +199,46 @@ def find_pairs(start, stop, seperator, serial_numbers, data_dir, out_file):
     if len(serial_numbers) != 2:
         raise ValueError('too many serial_numbers in config file')
 
-    qry = session.query(models.ImageMetadata.creationTimeStamp, models.ImageMetadata.serialNumber, models.ImageMetadata.frameNumber)
-    qry = qry.filter(start <= models.ImageMetadata.creationTimeStamp,
+    query = session.query(models.ImageMetadata.creationTimeStamp, models.ImageMetadata.serialNumber, models.ImageMetadata.frameNumber)
+    query = query.filter(start <= models.ImageMetadata.creationTimeStamp,
                      models.ImageMetadata.creationTimeStamp < stop,
                      models.ImageMetadata.serialNumber.in_(serial_numbers))
-    qry = qry.order_by(models.ImageMetadata.creationTimeStamp)
+    query = query.order_by(models.ImageMetadata.creationTimeStamp)
+    print len(query)
+    return
     
-    serial2times = {}
-    serialtime2frame = {}
-    for inst in qry: 
+    timestamp_index = {}
+    frameNumber_index = {}
+    for instance in query: 
         try:
-            serial2times[inst.serialNumber].append(inst.creationTimeStamp)
+            timestamp_index[instance.serialNumber].append(instance.creationTimeStamp)
         except KeyError:
-            serial2times[inst.serialNumber] = [inst.creationTimeStamp]
+            timestamp_index[instance.serialNumber] = [instance.creationTimeStamp]
         finally:
-            serialtime2frame[inst.serialNumber, inst.creationTimeStamp] = inst.frameNumber
+            frameNumber_index[instance.serialNumber, instance.creationTimeStamp] = instance.frameNumber
         
     pairs = []
-    for ts0 in serial2times[serial_numbers[0]]:        
-        ts1 = utils.take_closest(serial2times[serial_numbers[1]], ts0)
-        ts2 = utils.take_closest(serial2times[serial_numbers[0]], ts1)        
-        if ts0 == ts2:
+    for timestamp0 in timestamp_index[serial_numbers[0]]:        
+        timestamp1 = utils.take_closest(timestamp_index[serial_numbers[1]], timestamp0)
+        timestamp2 = utils.take_closest(timestamp_index[serial_numbers[0]], timestamp1)        
+        if timestamp0 == timestamp2:
             im0 = seperator.join(map(str,
-                                     (ts0.strftime('%Y%m%dT%H%M%S.%f'),
+                                     (timestamp0.strftime('%Y%m%dT%H%M%S.%f'),
                                       serial_numbers[0],
-                                      serialtime2frame[serial_numbers[0], ts0]))) + '.jpg'
-            im0 = os.path.join(data_dir, ts0.strftime('%Y%m%d'), ts0.strftime('%H'), im0)
+                                      frameNumber_index[serial_numbers[0], timestamp0]))) + '.jpg'
+            im0 = os.path.join(data_dir, timestamp0.strftime('%Y%m%d'), timestamp0.strftime('%H'), im0)
             im1 = seperator.join(map(str,
-                                     (ts1.strftime('%Y%m%dT%H%M%S.%f'),
+                                     (timestamp1.strftime('%Y%m%dT%H%M%S.%f'),
                                       serial_numbers[1],
-                                      serialtime2frame[serial_numbers[1], ts1]))) + '.jpg'
-            im1 = os.path.join(data_dir, ts1.strftime('%Y%m%d'), ts1.strftime('%H'), im1)
+                                      frameNumber_index[serial_numbers[1], timestamp1]))) + '.jpg'
+            im1 = os.path.join(data_dir, timestamp1.strftime('%Y%m%d'), timestamp1.strftime('%H'), im1)
             if not (os.path.isfile(im0) and os.path.isfile(im1)):
-                raise RuntimeError('one or more computed image paths do not exist: {} {}'.format(im0, im1))
+                warnings.warn('one or more computed image paths do not exist: {} {}'.format(im0, im1), RuntimeWarning, 2)
             pairs.append([im0, im1])
         else:
             warnings.warn('[{},{}]: backtracking mismatch of {:.2f}s'.format(serial_numbers[0],
-                                                                             ts0.isoformat(),
-                                                                             abs((ts1 - ts0).total_seconds())), RuntimeWarning, 2)
+                                                                             timestamp0.isoformat(),
+                                                                             abs((timestamp1 - timestamp0).total_seconds())), RuntimeWarning, 2)
     
     with open(out_file, 'w+') as fp:
         writer = csv.writer(fp, lineterminator='\n')

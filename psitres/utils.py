@@ -3,6 +3,14 @@ import bisect
 import math
 
 
+def binary_search(a, x):
+    'Locate the leftmost value exactly equal to x'
+    i = bisect.bisect_left(a, x)
+    if i != len(a) and a[i] == x:
+        return i
+    raise ValueError
+
+    
 def read_or_instantiate(session, model_, *index_columns, **keyword_expressions):
     try:
         if len(index_columns) > 0:
