@@ -12,6 +12,7 @@ import re
 import warnings
 import csv
 from sqlalchemy.inspection import inspect
+import joblib
 
 
 def _parse_fname(fname):
@@ -111,7 +112,7 @@ def _xml2model(root_path, rel_path, session):
 
 
 def _commit_init_files(output_dir, init_fnames):
-    pe._mp_print('_commit_init_files', len(init_fnames))
+    pe.mp_print('_commit_init_files', len(init_fnames))
     session = models.Session()
     instances = [_xml2model(output_dir, f, session) for f in init_fnames]
     index = {(inst.serialNumber, inst.creationTimeStamp) for inst in instances}
@@ -121,7 +122,7 @@ def _commit_init_files(output_dir, init_fnames):
 
 
 def _commit_data_files(output_dir, data_files, init_file_times):
-    pe._mp_print('_commit_data_files', len(data_files))
+    pe.mp_print('_commit_data_files', len(data_files))
     session = models.Session()
     instances = (_xml2model(output_dir, f, session) for f in data_files)
     instances = [instance for instance in instances if not inspect(instance).persistent]
@@ -151,7 +152,7 @@ def populate_db(data_dir, recreate):
     init_fnames = [f for f in sorted(os.listdir(data_dir)) 
                    if os.path.splitext(f)[1] == '.xml']
     t = time.time()
-    index = pe.ParFor()(pe.delayed(_commit_init_files)(data_dir, fnames) 
+    index = joblib.Parallel(-1)(joblib.delayed(_commit_init_files)(data_dir, fnames) 
                       for fnames in utils.partition(init_fnames, mp.cpu_count()))
     t = time.time() - t
     print '{} items / {} seconds = {} items per second'.format(len(init_fnames), t, len(init_fnames) / t)    
@@ -178,7 +179,7 @@ def populate_db(data_dir, recreate):
                       if os.path.splitext(f)[1] == '.xml']
         
         t = time.time()
-        index = pe.ParFor()(pe.delayed(_commit_data_files)(data_dir, fnames, init_timestamps) 
+        index = joblib.Parallel(-1)(joblib.delayed(_commit_data_files)(data_dir, fnames, init_timestamps) 
                           for fnames in utils.partition(data_files, mp.cpu_count()))
         t = time.time() - t
         print '{} items / {} seconds = {} items per second'.format(len(data_files), t, len(data_files) / t)

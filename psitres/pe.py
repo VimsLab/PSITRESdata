@@ -41,10 +41,8 @@ def _worker((callee, args, kwargs)):
         raise
     
     
-def _mp_print(*args, **kwargs):
-    ident = []
-    ident.append(mp.current_process().ident)
-    ident.append(threading.current_thread().ident)
+def mp_print(*args, **kwargs):
+    ident = '[P={} T={}]'.format(mp.current_process().ident, threading.current_thread().ident)
     print(ident, *args, **kwargs)    
     
     

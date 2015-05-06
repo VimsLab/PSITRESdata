@@ -1,8 +1,16 @@
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy import TypeDecorator, Index, Column, BigInteger, Integer, String, Boolean, create_engine, ForeignKey
+from sqlalchemy import engine_from_config, TypeDecorator, Index, Column, BigInteger, Integer, String, Boolean, ForeignKey
 from sqlalchemy.orm import sessionmaker, relationship, backref, scoped_session
 from sqlalchemy.inspection import inspect
 from datetime import datetime, timedelta
+import ast
+
+
+with open('config.py') as f:
+    engine = engine_from_config(ast.literal_eval(f.read()))
+inspector = inspect(engine)
+Base = declarative_base(bind=engine)
+Session = scoped_session(sessionmaker(bind=engine))
 
 
 class MicrosecondTimestamp(TypeDecorator):
@@ -12,12 +20,6 @@ class MicrosecondTimestamp(TypeDecorator):
         return long((value - self.epoch).total_seconds() * 10 ** 6)
     def process_result_value(self, value, dialect):
         return self.epoch + timedelta(microseconds=value)
-
-
-engine = create_engine('mysql+mysqldb://rhein:ps1tr3s@db.eecis.udel.edu:3306/psitres', echo=False)
-inspector = inspect(engine)
-Base = declarative_base(bind=engine)
-Session = scoped_session(sessionmaker(bind=engine))
 
 
 class CameraInfo(Base):

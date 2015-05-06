@@ -1,0 +1,4 @@
+{
+	'sqlalchemy.url':'mysql+mysqldb://user:password@db.eecis.udel.edu:3306/psitres', 
+	'sqlalchemy.echo':False,
+}
