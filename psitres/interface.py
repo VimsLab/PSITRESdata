@@ -183,7 +183,7 @@ def populate_db(data_dir, recreate):
                           for fnames in utils.partition(data_files, mp.cpu_count()))
         t = time.time() - t
         print '{} items / {} seconds = {} items per second'.format(len(data_files), t, len(data_files) / t)
-    
+        
 
 @click.command()
 @click.option('--start', help='starting datetime formatted as %Y-%m-%d %H:%M:%S.%f', required=True)    
@@ -197,16 +197,15 @@ def find_pairs(start, stop, seperator, serial_numbers, data_dir, out_file):
     start = datetime.strptime(start, '%Y-%m-%d %H:%M:%S.%f') 
     stop = datetime.strptime(stop, '%Y-%m-%d %H:%M:%S.%f') 
     serial_numbers = [int(s) for s in serial_numbers]
-    if len(serial_numbers) != 2:
-        raise ValueError('too many serial_numbers in config file')
-
-    query = session.query(models.ImageMetadata.creationTimeStamp, models.ImageMetadata.serialNumber, models.ImageMetadata.frameNumber)
+    
+    query = session.query(models.ImageMetadata.creationTimeStamp,
+                          models.ImageMetadata.serialNumber,
+                          models.ImageMetadata.frameNumber)
     query = query.filter(start <= models.ImageMetadata.creationTimeStamp,
-                     models.ImageMetadata.creationTimeStamp < stop,
-                     models.ImageMetadata.serialNumber.in_(serial_numbers))
+                         models.ImageMetadata.creationTimeStamp < stop,
+                         models.ImageMetadata.serialNumber.in_(serial_numbers))
     query = query.order_by(models.ImageMetadata.creationTimeStamp)
-    print len(query)
-    return
+    print '{} potential pairs selected'.format(query.count() / 2)
     
     timestamp_index = {}
     frameNumber_index = {}
@@ -217,34 +216,34 @@ def find_pairs(start, stop, seperator, serial_numbers, data_dir, out_file):
             timestamp_index[instance.serialNumber] = [instance.creationTimeStamp]
         finally:
             frameNumber_index[instance.serialNumber, instance.creationTimeStamp] = instance.frameNumber
-        
+    print '{} maximum possible pairs'.format(min(len(v) for v in timestamp_index.values()))
+    
     pairs = []
-    for timestamp0 in timestamp_index[serial_numbers[0]]:        
-        timestamp1 = utils.take_closest(timestamp_index[serial_numbers[1]], timestamp0)
-        timestamp2 = utils.take_closest(timestamp_index[serial_numbers[0]], timestamp1)        
-        if timestamp0 == timestamp2:
+    for timestamp in timestamp_index[serial_numbers[0]]:        
+        forward_match = utils.take_closest(timestamp_index[serial_numbers[1]], timestamp)
+        backward_match = utils.take_closest(timestamp_index[serial_numbers[0]], forward_match)        
+        if timestamp == backward_match:
             im0 = seperator.join(map(str,
-                                     (timestamp0.strftime('%Y%m%dT%H%M%S.%f'),
+                                     (timestamp.strftime('%Y%m%dT%H%M%S.%f'),
                                       serial_numbers[0],
-                                      frameNumber_index[serial_numbers[0], timestamp0]))) + '.jpg'
-            im0 = os.path.join(data_dir, timestamp0.strftime('%Y%m%d'), timestamp0.strftime('%H'), im0)
+                                      frameNumber_index[serial_numbers[0], timestamp]))) + '.jpg'
+            im0 = os.path.join(data_dir, timestamp.strftime('%Y%m%d'), timestamp.strftime('%H'), im0)
             im1 = seperator.join(map(str,
-                                     (timestamp1.strftime('%Y%m%dT%H%M%S.%f'),
+                                     (forward_match.strftime('%Y%m%dT%H%M%S.%f'),
                                       serial_numbers[1],
-                                      frameNumber_index[serial_numbers[1], timestamp1]))) + '.jpg'
-            im1 = os.path.join(data_dir, timestamp1.strftime('%Y%m%d'), timestamp1.strftime('%H'), im1)
+                                      frameNumber_index[serial_numbers[1], forward_match]))) + '.jpg'
+            im1 = os.path.join(data_dir, forward_match.strftime('%Y%m%d'), forward_match.strftime('%H'), im1)
             if not (os.path.isfile(im0) and os.path.isfile(im1)):
-                warnings.warn('one or more computed image paths do not exist: {} {}'.format(im0, im1), RuntimeWarning, 2)
+                warnings.warn('some computed image paths do not exist')
             pairs.append([im0, im1])
         else:
-            warnings.warn('[{},{}]: backtracking mismatch of {:.2f}s'.format(serial_numbers[0],
-                                                                             timestamp0.isoformat(),
-                                                                             abs((timestamp1 - timestamp0).total_seconds())), RuntimeWarning, 2)
+            warnings.warn('some backtracking mismatches')    
     
     with open(out_file, 'w+') as fp:
         writer = csv.writer(fp, lineterminator='\n')
         writer.writerows(pairs)
-
+    print '{} pairs written to disk'.format(len(pairs))
+    
 
 @click.group()
 def cli():
